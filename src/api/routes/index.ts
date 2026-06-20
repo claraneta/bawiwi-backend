@@ -1,0 +1,1 @@
+// this is where to be imported all the routes of the project and then export them as a single module to be used in the main server file
