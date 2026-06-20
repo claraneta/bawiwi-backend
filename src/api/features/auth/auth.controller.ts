@@ -17,6 +17,9 @@ export const validateEmail = async (
       return;
     }
 
+    //send email to user 
+    
+
     success(res, { valid: true });
     return;
   } catch (error) {
