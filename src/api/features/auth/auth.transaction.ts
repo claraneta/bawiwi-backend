@@ -1,7 +1,7 @@
 import { sendEmail, SendEmailOptions, SendEmailResult, verificationCodeEmail } from '../../shared/email';
 import { generateCode } from '../../shared/helpers/code-generator';
 import { VerificationPurpose } from '../../../db/entities/verification-code.entity';
-import { createVerificationCode } from './data-services/verification-code.service';
+import { createVerificationCode, invalidatePreviousCodes } from './data-services/verification-code.service';
 
 export interface SendAndStoreCodeParams {
   email: string;
@@ -41,6 +41,9 @@ export async function sendVerificationCode(params: SendAndStoreCodeParams): Prom
 
   try {
     const expiresAt = new Date(Date.now() + CODE_EXPIRY_MINUTES * 60 * 1000);
+
+    // Invalidate any previous unused codes for this email + purpose
+    await invalidatePreviousCodes({ email, purpose });
 
     const saved = await createVerificationCode({
       email,
