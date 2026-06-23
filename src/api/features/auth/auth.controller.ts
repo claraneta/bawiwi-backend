@@ -1,5 +1,5 @@
 import { Request, Response } from "express";
-import { AuthValidateEmailRequestBody } from "./auth.interface";
+import { ValidateEmailBody } from "./auth.validator";
 import { findByEmail } from "../../shared/data-services/user.service";
 import { badRequest, success, internalError } from "../../response-builder";
 import { sendVerificationCode } from "./auth.transaction";
@@ -10,7 +10,7 @@ export const validateEmail = async (
   res: Response,
 ) => {
   try {
-    const { email }: AuthValidateEmailRequestBody = req.body;
+    const { email }: ValidateEmailBody = req.body;
 
     const user = await findByEmail(email);
 

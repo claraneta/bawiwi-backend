@@ -2,7 +2,7 @@ import 'reflect-metadata';
 import { config } from 'dotenv';
 import express, { NextFunction, Request, Response } from 'express';
 import { AppDataSource } from './src/db/data-source';
-import apiRoutes from './src/api';
+import apiRoutes from './src/api/route-index';
 
 config();
 

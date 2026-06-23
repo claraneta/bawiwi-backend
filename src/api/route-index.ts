@@ -1,10 +1,10 @@
 import { Router } from 'express';
 import helloRoutes from './features/hello';
-//import authRoutes from './features/auth.route.ts';
+import authRoutes from './features/auth/auth.route';
 
 const router = Router();
 
 router.use('/hello', helloRoutes);
-//router.use('/auth', authRoutes);
+router.use('/auth', authRoutes);
 
 export default router;
