@@ -14,6 +14,33 @@ jest.mock("./data-services/verification-code.service", () => ({
   invalidatePreviousCodes: jest.fn(),
 }));
 
+jest.mock("../../../db/data-source", () => {
+  const userRepoMock = {
+    create: jest.fn(),
+    save: jest.fn(),
+  };
+  const detailsRepoMock = {
+    create: jest.fn(),
+    save: jest.fn(),
+  };
+  const managerMock = {
+    getRepository: jest.fn().mockImplementation((entity: any) => {
+      if (entity && entity.name === "UserDetails") return detailsRepoMock;
+      return userRepoMock;
+    }),
+  };
+
+  return {
+    AppDataSource: {
+      transaction: jest.fn().mockImplementation(
+        async (cb: (mgr: any) => Promise<unknown>) => cb(managerMock),
+      ),
+      _userRepo: userRepoMock,
+      _detailsRepo: detailsRepoMock,
+    },
+  };
+});
+
 import { sendEmail } from "../../shared/email";
 import { verificationCodeEmail } from "../../shared/email";
 import { generateCode } from "../../shared/helpers/code-generator";
@@ -21,8 +48,9 @@ import {
   createVerificationCode,
   invalidatePreviousCodes,
 } from "./data-services/verification-code.service";
-import { sendVerificationCode } from "./auth.transaction";
+import { sendVerificationCode, createUser } from "./auth.transaction";
 import { VerificationPurpose } from "../../../db/entities/verification-code.entity";
+import { User, UserRole } from "../../../db/entities/user.entity";
 
 const mockedSendEmail = jest.mocked(sendEmail);
 const mockedVerificationCodeEmail = jest.mocked(verificationCodeEmail);
@@ -351,6 +379,148 @@ describe("sendVerificationCode", () => {
       expect(mockedCreateVerificationCode).toHaveBeenCalledWith(
         expect.objectContaining({ email: differentEmail }),
       );
+    });
+  });
+
+  describe("createUser", () => {
+    let userRepoMock: { create: jest.Mock; save: jest.Mock };
+    let detailsRepoMock: { create: jest.Mock; save: jest.Mock };
+
+    const mockUser: User = {
+      id: "new-uuid-001",
+      email: "newuser@example.com",
+      phone: "09171234567",
+      role: UserRole.WORKER,
+      createdAt: new Date("2026-01-01"),
+      updatedAt: new Date("2026-01-01"),
+      deactivated: false,
+    } as User;
+
+    const createParams = {
+      email: "newuser@example.com",
+      phone: "09171234567",
+      role: UserRole.WORKER,
+      firstName: "John",
+      lastName: "Doe",
+      birthdate: new Date("2000-01-15"),
+    };
+
+    beforeAll(() => {
+      const { AppDataSource } = require("../../../db/data-source");
+      userRepoMock = AppDataSource._userRepo;
+      detailsRepoMock = AppDataSource._detailsRepo;
+    });
+
+    afterEach(() => {
+      jest.clearAllMocks();
+    });
+
+    it("should call AppDataSource.transaction", async () => {
+      const { AppDataSource } = require("../../../db/data-source");
+      userRepoMock.create.mockReturnValue(mockUser);
+      userRepoMock.save.mockResolvedValue(mockUser);
+      detailsRepoMock.create.mockReturnValue({});
+      detailsRepoMock.save.mockResolvedValue({});
+
+      await createUser(createParams);
+
+      expect(AppDataSource.transaction).toHaveBeenCalled();
+    });
+
+    it("should create a user in the user repository", async () => {
+      userRepoMock.create.mockReturnValue(mockUser);
+      userRepoMock.save.mockResolvedValue(mockUser);
+      detailsRepoMock.create.mockReturnValue({});
+      detailsRepoMock.save.mockResolvedValue({});
+
+      await createUser(createParams);
+
+      expect(userRepoMock.create).toHaveBeenCalledWith({
+        email: createParams.email,
+        phone: createParams.phone,
+        role: createParams.role,
+      });
+    });
+
+    it("should save the created user", async () => {
+      userRepoMock.create.mockReturnValue(mockUser);
+      userRepoMock.save.mockResolvedValue(mockUser);
+      detailsRepoMock.create.mockReturnValue({});
+      detailsRepoMock.save.mockResolvedValue({});
+
+      await createUser(createParams);
+
+      expect(userRepoMock.save).toHaveBeenCalledWith(mockUser);
+    });
+
+    it("should create user details with the saved user id", async () => {
+      userRepoMock.create.mockReturnValue(mockUser);
+      userRepoMock.save.mockResolvedValue(mockUser);
+      detailsRepoMock.create.mockReturnValue({});
+      detailsRepoMock.save.mockResolvedValue({});
+
+      await createUser(createParams);
+
+      expect(detailsRepoMock.create).toHaveBeenCalledWith({
+        userId: mockUser.id,
+        firstName: createParams.firstName,
+        lastName: createParams.lastName,
+        birthdate: createParams.birthdate,
+      });
+    });
+
+    it("should save user details", async () => {
+      const mockDetails = { id: "details-001", userId: mockUser.id };
+      userRepoMock.create.mockReturnValue(mockUser);
+      userRepoMock.save.mockResolvedValue(mockUser);
+      detailsRepoMock.create.mockReturnValue(mockDetails);
+      detailsRepoMock.save.mockResolvedValue(mockDetails);
+
+      await createUser(createParams);
+
+      expect(detailsRepoMock.save).toHaveBeenCalledWith(mockDetails);
+    });
+
+    it("should return success with the saved user", async () => {
+      userRepoMock.create.mockReturnValue(mockUser);
+      userRepoMock.save.mockResolvedValue(mockUser);
+      detailsRepoMock.create.mockReturnValue({});
+      detailsRepoMock.save.mockResolvedValue({});
+
+      const result = await createUser(createParams);
+
+      expect(result).toEqual({ success: true, user: mockUser });
+    });
+
+    it("should return failure with error message when user save fails", async () => {
+      const dbError = new Error("Email already exists");
+      userRepoMock.create.mockReturnValue(mockUser);
+      userRepoMock.save.mockRejectedValue(dbError);
+
+      const result = await createUser(createParams);
+
+      expect(result).toEqual({ success: false, error: "Email already exists" });
+      expect(detailsRepoMock.save).not.toHaveBeenCalled();
+    });
+
+    it("should return failure with error message when details save fails", async () => {
+      userRepoMock.create.mockReturnValue(mockUser);
+      userRepoMock.save.mockResolvedValue(mockUser);
+      detailsRepoMock.create.mockReturnValue({});
+      detailsRepoMock.save.mockRejectedValue(new Error("Details insert failed"));
+
+      const result = await createUser(createParams);
+
+      expect(result).toEqual({ success: false, error: "Details insert failed" });
+    });
+
+    it("should return fallback error message when error is not an Error instance", async () => {
+      userRepoMock.create.mockReturnValue(mockUser);
+      userRepoMock.save.mockRejectedValue("string error");
+
+      const result = await createUser(createParams);
+
+      expect(result).toEqual({ success: false, error: "Failed to create user" });
     });
   });
 });

@@ -1,6 +1,6 @@
 import { z } from "zod";
-import { Request, Response, NextFunction } from "express";
-import { badRequest } from "../../response-builder";
+
+// --------------- validate-email ---------------
 
 export const validateEmailSchema = z.object({
   email: z.email({ message: "Invalid email format" }),
@@ -8,19 +8,17 @@ export const validateEmailSchema = z.object({
 
 export type ValidateEmailBody = z.infer<typeof validateEmailSchema>;
 
-export const validateEmailMiddleware = (
-  req: Request,
-  res: Response,
-  next: NextFunction,
-) => {
-  const result = validateEmailSchema.safeParse(req.body);
+// --------------- register ---------------
 
-  if (!result.success) {
-    const message = result.error.issues[0]?.message ?? "Validation failed";
-    badRequest(res, message);
-    return;
-  }
+export const registerSchema = z.object({
+  email: z.email({ message: "Invalid email format" }),
+  phone: z.string().min(1, "Phone is required"),
+  role: z.enum(["worker", "client"], {
+    message: "Role must be 'worker' or 'client'",
+  }),
+  firstName: z.string().min(1, "First name is required"),
+  lastName: z.string().min(1, "Last name is required"),
+  birthdate: z.string().regex(/^\d{4}-\d{2}-\d{2}$/, "Birthdate must be YYYY-MM-DD"),
+});
 
-  req.body = result.data;
-  next();
-};
+export type RegisterBody = z.infer<typeof registerSchema>;

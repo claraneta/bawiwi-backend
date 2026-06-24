@@ -6,16 +6,18 @@ jest.mock("../../shared/data-services/user.service", () => ({
 
 jest.mock("./auth.transaction", () => ({
   sendVerificationCode: jest.fn(),
+  createUser: jest.fn(),
 }));
 
 import request from "supertest";
 import express from "express";
 import authRoutes from "./auth.route";
 import { findByEmail } from "../../shared/data-services/user.service";
-import { sendVerificationCode } from "./auth.transaction";
+import { createUser, sendVerificationCode } from "./auth.transaction";
 import { VerificationPurpose } from "../../../db/entities/verification-code.entity";
 
 const mockedFindByEmail = jest.mocked(findByEmail);
+const mockedCreateUser = jest.mocked(createUser);
 const mockedSendVerificationCode = jest.mocked(sendVerificationCode);
 
 describe("Auth Feature", () => {
@@ -29,6 +31,218 @@ describe("Auth Feature", () => {
 
   afterEach(() => {
     jest.clearAllMocks();
+  });
+
+  describe("POST /auth/register", () => {
+    const validBody = {
+      email: "newuser@example.com",
+      phone: "09171234567",
+      role: "worker",
+      firstName: "John",
+      lastName: "Doe",
+      birthdate: "2000-01-15",
+    };
+
+    const mockCreatedUser = {
+      id: "user-new-001",
+      email: validBody.email,
+      phone: validBody.phone,
+      role: "worker",
+    };
+
+    it("should return 201 with user summary when registration succeeds", async () => {
+      mockedFindByEmail.mockResolvedValue(null);
+      mockedCreateUser.mockResolvedValue({ success: true, user: mockCreatedUser } as any);
+      mockedSendVerificationCode.mockResolvedValue({
+        success: true,
+        codeId: "code-001",
+        emailId: "email-001",
+      });
+
+      const response = await request(app)
+        .post("/auth/register")
+        .send(validBody);
+
+      expect(response.status).toBe(201);
+      expect(response.body).toEqual({
+        error: 0,
+        data: {
+          id: "user-new-001",
+          email: "newuser@example.com",
+          role: "worker",
+        },
+        message: "Registration successful. Please check your email for the verification code.",
+      });
+    });
+
+    it("should return 409 when email is already registered", async () => {
+      mockedFindByEmail.mockResolvedValue({ id: "existing-user" } as any);
+
+      const response = await request(app)
+        .post("/auth/register")
+        .send(validBody);
+
+      expect(response.status).toBe(409);
+      expect(response.body).toEqual({
+        error: 1,
+        data: null,
+        message: "Email is already registered",
+      });
+    });
+
+    it("should not create user or send code when email is taken", async () => {
+      mockedFindByEmail.mockResolvedValue({ id: "existing-user" } as any);
+
+      await request(app)
+        .post("/auth/register")
+        .send(validBody);
+
+      expect(mockedCreateUser).not.toHaveBeenCalled();
+      expect(mockedSendVerificationCode).not.toHaveBeenCalled();
+    });
+
+    it("should return 400 when email format is invalid", async () => {
+      const response = await request(app)
+        .post("/auth/register")
+        .send({ ...validBody, email: "not-an-email" });
+
+      expect(response.status).toBe(400);
+      expect(response.body).toEqual({
+        error: 1,
+        data: null,
+        message: "Invalid email format",
+      });
+    });
+
+    it("should return 400 when firstName is missing", async () => {
+      const { firstName, ...noFirst } = validBody;
+      const response = await request(app)
+        .post("/auth/register")
+        .send(noFirst);
+
+      expect(response.status).toBe(400);
+    });
+
+    it("should return 400 when role is invalid", async () => {
+      const response = await request(app)
+        .post("/auth/register")
+        .send({ ...validBody, role: "admin" });
+
+      expect(response.status).toBe(400);
+      expect(response.body).toEqual({
+        error: 1,
+        data: null,
+        message: "Role must be 'worker' or 'client'",
+      });
+    });
+
+    it("should return 400 when birthdate format is invalid", async () => {
+      const response = await request(app)
+        .post("/auth/register")
+        .send({ ...validBody, birthdate: "15-01-2000" });
+
+      expect(response.status).toBe(400);
+      expect(response.body).toEqual({
+        error: 1,
+        data: null,
+        message: "Birthdate must be YYYY-MM-DD",
+      });
+    });
+
+    it("should return 500 when sendVerificationCode fails", async () => {
+      mockedFindByEmail.mockResolvedValue(null);
+      mockedCreateUser.mockResolvedValue({ success: true, user: mockCreatedUser } as any);
+      mockedSendVerificationCode.mockResolvedValue({
+        success: false,
+        error: "Email service unavailable",
+        step: "email",
+      });
+
+      const response = await request(app)
+        .post("/auth/register")
+        .send(validBody);
+
+      expect(response.status).toBe(500);
+    });
+
+    it("should return 500 when createUser fails", async () => {
+      mockedFindByEmail.mockResolvedValue(null);
+      mockedCreateUser.mockResolvedValue({ success: false, error: "Email already exists" });
+
+      const response = await request(app)
+        .post("/auth/register")
+        .send(validBody);
+
+      expect(response.status).toBe(500);
+      expect(response.body).toEqual({
+        error: 1,
+        data: null,
+        message: "Email already exists",
+      });
+    });
+
+    it("should call createUser with correct params", async () => {
+      mockedFindByEmail.mockResolvedValue(null);
+      mockedCreateUser.mockResolvedValue({ success: true, user: mockCreatedUser } as any);
+      mockedSendVerificationCode.mockResolvedValue({
+        success: true,
+        codeId: "code-002",
+        emailId: "email-002",
+      });
+
+      await request(app)
+        .post("/auth/register")
+        .send(validBody);
+
+      expect(mockedCreateUser).toHaveBeenCalledWith({
+        email: "newuser@example.com",
+        phone: "09171234567",
+        role: "worker",
+        firstName: "John",
+        lastName: "Doe",
+        birthdate: expect.any(Date),
+      });
+    });
+
+    it("should send SIGNUP verification code after creating user", async () => {
+      mockedFindByEmail.mockResolvedValue(null);
+      mockedCreateUser.mockResolvedValue({ success: true, user: mockCreatedUser } as any);
+      mockedSendVerificationCode.mockResolvedValue({
+        success: true,
+        codeId: "code-003",
+        emailId: "email-003",
+      });
+
+      await request(app)
+        .post("/auth/register")
+        .send(validBody);
+
+      expect(mockedSendVerificationCode).toHaveBeenCalledWith({
+        email: "newuser@example.com",
+        purpose: VerificationPurpose.SIGNUP,
+        recipientName: "John",
+      });
+      const createCallOrder = mockedCreateUser.mock.invocationCallOrder[0];
+      const sendCallOrder = mockedSendVerificationCode.mock.invocationCallOrder[0];
+      expect(createCallOrder).toBeLessThan(sendCallOrder);
+    });
+
+    it("should accept client role", async () => {
+      mockedFindByEmail.mockResolvedValue(null);
+      mockedCreateUser.mockResolvedValue({ success: true, user: { ...mockCreatedUser, role: "client" } } as any);
+      mockedSendVerificationCode.mockResolvedValue({
+        success: true,
+        codeId: "code-004",
+        emailId: "email-004",
+      });
+
+      const response = await request(app)
+        .post("/auth/register")
+        .send({ ...validBody, role: "client" });
+
+      expect(response.status).toBe(201);
+      expect(response.body.data.role).toBe("client");
+    });
   });
 
   describe("POST /auth/validate-email", () => {
