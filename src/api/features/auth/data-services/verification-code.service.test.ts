@@ -48,7 +48,7 @@ describe("VerificationCodeService", () => {
       purpose: VerificationPurpose.EMAIL_VERIFICATION,
     };
 
-    it("should call repo.update with the correct where clause and usedAt timestamp", async () => {
+    it("should call repo.update when email is provided", async () => {
       mockRepo.update.mockResolvedValue({ affected: 2 });
 
       await verificationCodeService.invalidatePreviousCodes(params);
@@ -61,6 +61,36 @@ describe("VerificationCodeService", () => {
         },
         { usedAt: expect.any(Date) },
       );
+    });
+
+    it("should call repo.update when phone is provided", async () => {
+      mockRepo.update.mockResolvedValue({ affected: 1 });
+
+      await verificationCodeService.invalidatePreviousCodes({
+        phone: "09171234567",
+        purpose: VerificationPurpose.SIGNUP,
+      });
+
+      expect(mockRepo.update).toHaveBeenCalledWith(
+        {
+          phone: "09171234567",
+          purpose: VerificationPurpose.SIGNUP,
+          usedAt: expect.anything(),
+        },
+        { usedAt: expect.any(Date) },
+      );
+    });
+
+    it("should call repo.update for both email and phone when both provided", async () => {
+      mockRepo.update.mockResolvedValue({ affected: 1 });
+
+      await verificationCodeService.invalidatePreviousCodes({
+        email: "user@example.com",
+        phone: "09171234567",
+        purpose: VerificationPurpose.EMAIL_VERIFICATION,
+      });
+
+      expect(mockRepo.update).toHaveBeenCalledTimes(2);
     });
 
     it("should set usedAt to a recent Date", async () => {
@@ -122,7 +152,7 @@ describe("VerificationCodeService", () => {
 
     const createdEntity = { ...mockVerificationCode, ...createParams, phone: "09171234567" };
 
-    it("should call repo.create with the correct data", async () => {
+    it("should call repo.create with the correct data and default channel", async () => {
       mockRepo.create.mockReturnValue(createdEntity);
       mockRepo.save.mockResolvedValue(createdEntity);
 
@@ -134,6 +164,7 @@ describe("VerificationCodeService", () => {
         purpose: createParams.purpose,
         expiresAt: createParams.expiresAt,
         phone: createParams.phone,
+        channel: 'email',
       });
     });
 
@@ -157,6 +188,20 @@ describe("VerificationCodeService", () => {
       expect(result.code).toBe("654321");
     });
 
+    it("should accept an explicit channel", async () => {
+      mockRepo.create.mockReturnValue(createdEntity);
+      mockRepo.save.mockResolvedValue(createdEntity);
+
+      await verificationCodeService.createVerificationCode({
+        ...createParams,
+        channel: 'sms' as any,
+      });
+
+      expect(mockRepo.create).toHaveBeenCalledWith(
+        expect.objectContaining({ channel: 'sms' }),
+      );
+    });
+
     it("should use null for phone when phone is not provided", async () => {
       const paramsWithoutPhone = {
         email: "nophone@example.com",
@@ -164,7 +209,7 @@ describe("VerificationCodeService", () => {
         purpose: VerificationPurpose.EMAIL_VERIFICATION,
         expiresAt: new Date(),
       };
-      const entityWithoutPhone = { ...mockVerificationCode, ...paramsWithoutPhone, phone: null };
+      const entityWithoutPhone = { ...mockVerificationCode, ...paramsWithoutPhone, phone: null, channel: "email" };
 
       mockRepo.create.mockReturnValue(entityWithoutPhone);
       mockRepo.save.mockResolvedValue(entityWithoutPhone);
@@ -177,6 +222,7 @@ describe("VerificationCodeService", () => {
         purpose: paramsWithoutPhone.purpose,
         expiresAt: paramsWithoutPhone.expiresAt,
         phone: null,
+        channel: 'email',
       });
     });
 
@@ -188,7 +234,7 @@ describe("VerificationCodeService", () => {
         expiresAt: new Date(),
         phone: undefined,
       };
-      const entityWithNullPhone = { ...mockVerificationCode, ...paramsWithUndefinedPhone, phone: null };
+      const entityWithNullPhone = { ...mockVerificationCode, ...paramsWithUndefinedPhone, phone: null, channel: "email" };
 
       mockRepo.create.mockReturnValue(entityWithNullPhone);
       mockRepo.save.mockResolvedValue(entityWithNullPhone);
@@ -201,6 +247,7 @@ describe("VerificationCodeService", () => {
         purpose: paramsWithUndefinedPhone.purpose,
         expiresAt: paramsWithUndefinedPhone.expiresAt,
         phone: null,
+        channel: 'email',
       });
     });
 

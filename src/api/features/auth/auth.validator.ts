@@ -1,18 +1,27 @@
 import { z } from "zod";
 
-// --------------- validate-email ---------------
+// --------------- Philippine phone number ---------------
 
-export const validateEmailSchema = z.object({
-  email: z.email({ message: "Invalid email format" }),
-});
+const philippinePhoneRegex = /^(09|\+639)\d{9}$/;
+const philippinePhoneError = "Phone must be a valid Philippine mobile number (e.g., 09171234567 or +639171234567)";
 
-export type ValidateEmailBody = z.infer<typeof validateEmailSchema>;
+// --------------- validate-identifier (email or phone) ---------------
+
+export const validateIdentifierSchema = z.object({
+  email: z.email({ message: "Invalid email format" }).optional(),
+  phone: z.string().regex(philippinePhoneRegex, philippinePhoneError).optional(),
+}).refine(
+  (data) => data.email !== undefined || data.phone !== undefined,
+  { message: "Either email or phone is required", path: ["email"] },
+);
+
+export type ValidateIdentifierBody = z.infer<typeof validateIdentifierSchema>;
 
 // --------------- register ---------------
 
 export const registerSchema = z.object({
   email: z.email({ message: "Invalid email format" }),
-  phone: z.string().min(1, "Phone is required"),
+  phone: z.string().regex(philippinePhoneRegex, philippinePhoneError),
   role: z.enum(["worker", "client"], {
     message: "Role must be 'worker' or 'client'",
   }),
@@ -27,7 +36,7 @@ export type RegisterBody = z.infer<typeof registerSchema>;
 
 export const verifyCodeSchema = z.object({
   email: z.email({ message: "Invalid email format" }).optional(),
-  phone: z.string().min(1, "Phone is required").optional(),
+  phone: z.string().regex(philippinePhoneRegex, philippinePhoneError).optional(),
   code: z.string().length(6, "Code must be 6 digits"),
 }).refine(
   (data) => data.email !== undefined || data.phone !== undefined,

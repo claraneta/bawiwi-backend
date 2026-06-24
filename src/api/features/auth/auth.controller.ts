@@ -2,26 +2,32 @@ import { Request, Response } from "express";
 import { UserRole } from "../../../db/entities/user.entity";
 import { VerificationPurpose } from "../../../db/entities/verification-code.entity";
 import { badRequest, conflict, created, internalError, success } from "../../response-builder";
-import { findByEmail } from "../../shared/data-services/user.service";
+import { findByEmail, findByPhone } from "../../shared/data-services/user.service";
 import { createUser, sendVerificationCode, verifyCode } from "./auth.transaction";
-import { RegisterBody, ValidateEmailBody, VerifyCodeBody } from "./auth.validator";
+import { RegisterBody, ValidateIdentifierBody, VerifyCodeBody } from "./auth.validator";
 
-export const validateEmail = async (
+export const validateIdentifier = async (
   req: Request,
   res: Response,
 ) => {
   try {
-    const { email }: ValidateEmailBody = req.body;
+    const { email, phone }: ValidateIdentifierBody = req.body;
 
-    const user = await findByEmail(email);
+    // Look up user by email or phone
+    const user = email
+      ? await findByEmail(email)
+      : phone
+        ? await findByPhone(phone)
+        : null;
 
     if (!user) {
-      badRequest(res, "Email is not registered");
+      badRequest(res, email ? "Email is not registered" : "Phone is not registered");
       return;
     }
 
     const result = await sendVerificationCode({
       email,
+      phone,
       purpose: VerificationPurpose.EMAIL_VERIFICATION,
       recipientName: user.details?.firstName ?? undefined,
     });

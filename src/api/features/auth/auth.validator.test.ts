@@ -1,6 +1,6 @@
 /// <reference types="jest" />
 
-import { validateEmailSchema, registerSchema } from "./auth.validator";
+import { validateIdentifierSchema, registerSchema, verifyCodeSchema } from "./auth.validator";
 
 const validRegisterBody = {
   email: "user@example.com",
@@ -11,50 +11,96 @@ const validRegisterBody = {
   birthdate: "2000-01-15",
 };
 
-describe("validateEmailSchema (Zod schema)", () => {
-  it("should accept a valid email", () => {
-    const result = validateEmailSchema.safeParse({ email: "user@example.com" });
-    expect(result.success).toBe(true);
+describe("validateIdentifierSchema (Zod schema)", () => {
+  describe("email-based", () => {
+    it("should accept a valid email", () => {
+      const result = validateIdentifierSchema.safeParse({ email: "user@example.com" });
+      expect(result.success).toBe(true);
+    });
+
+    it("should accept emails with subdomains", () => {
+      const result = validateIdentifierSchema.safeParse({ email: "user@sub.example.com" });
+      expect(result.success).toBe(true);
+    });
+
+    it("should accept emails with plus sign", () => {
+      const result = validateIdentifierSchema.safeParse({ email: "user+tag@example.com" });
+      expect(result.success).toBe(true);
+    });
+
+    it("should reject a string without @ symbol", () => {
+      const result = validateIdentifierSchema.safeParse({ email: "notanemail" });
+      expect(result.success).toBe(false);
+    });
+
+    it("should reject an empty email string", () => {
+      const result = validateIdentifierSchema.safeParse({ email: "" });
+      expect(result.success).toBe(false);
+    });
+
+    it("should reject null email", () => {
+      const result = validateIdentifierSchema.safeParse({ email: null });
+      expect(result.success).toBe(false);
+    });
+
+    it("should reject numeric email", () => {
+      const result = validateIdentifierSchema.safeParse({ email: 12345 });
+      expect(result.success).toBe(false);
+    });
   });
 
-  it("should accept emails with subdomains", () => {
-    const result = validateEmailSchema.safeParse({ email: "user@sub.example.com" });
-    expect(result.success).toBe(true);
+  describe("phone-based", () => {
+    it("should accept a valid 09-prefix phone", () => {
+      const result = validateIdentifierSchema.safeParse({ phone: "09171234567" });
+      expect(result.success).toBe(true);
+    });
+
+    it("should accept a valid +63-prefix phone", () => {
+      const result = validateIdentifierSchema.safeParse({ phone: "+639171234567" });
+      expect(result.success).toBe(true);
+    });
+
+    it("should reject empty phone", () => {
+      const result = validateIdentifierSchema.safeParse({ phone: "" });
+      expect(result.success).toBe(false);
+    });
+
+    it("should reject null phone", () => {
+      const result = validateIdentifierSchema.safeParse({ phone: null });
+      expect(result.success).toBe(false);
+    });
+
+    it("should reject a phone with too few digits", () => {
+      const result = validateIdentifierSchema.safeParse({ phone: "0917123456" });
+      expect(result.success).toBe(false);
+    });
+
+    it("should reject a phone with too many digits", () => {
+      const result = validateIdentifierSchema.safeParse({ phone: "091712345678" });
+      expect(result.success).toBe(false);
+    });
+
+    it("should reject a phone without the 09 or +63 prefix", () => {
+      const result = validateIdentifierSchema.safeParse({ phone: "12345678901" });
+      expect(result.success).toBe(false);
+    });
+
+    it("should reject a landline number", () => {
+      const result = validateIdentifierSchema.safeParse({ phone: "0281234567" });
+      expect(result.success).toBe(false);
+    });
   });
 
-  it("should accept emails with plus sign", () => {
-    const result = validateEmailSchema.safeParse({ email: "user+tag@example.com" });
-    expect(result.success).toBe(true);
-  });
+  describe("validation rules", () => {
+    it("should reject when neither email nor phone is provided", () => {
+      const result = validateIdentifierSchema.safeParse({});
+      expect(result.success).toBe(false);
+    });
 
-  it("should reject a string without @ symbol", () => {
-    const result = validateEmailSchema.safeParse({ email: "notanemail" });
-    expect(result.success).toBe(false);
-  });
-
-  it("should reject an empty string", () => {
-    const result = validateEmailSchema.safeParse({ email: "" });
-    expect(result.success).toBe(false);
-  });
-
-  it("should reject missing email field", () => {
-    const result = validateEmailSchema.safeParse({});
-    expect(result.success).toBe(false);
-  });
-
-  it("should reject null email", () => {
-    const result = validateEmailSchema.safeParse({ email: null });
-    expect(result.success).toBe(false);
-  });
-
-  it("should reject numeric email", () => {
-    const result = validateEmailSchema.safeParse({ email: 12345 });
-    expect(result.success).toBe(false);
-  });
-
-  it("should allow extra fields (Zod strip mode by default)", () => {
-    const result = validateEmailSchema.safeParse({ email: "user@example.com", extra: "field" });
-    expect(result.success).toBe(true);
+    it("should allow extra fields (Zod strip mode by default)", () => {
+      const result = validateIdentifierSchema.safeParse({ email: "user@example.com", extra: "field" });
+      expect(result.success).toBe(true);
+    });
   });
 });
 
@@ -108,6 +154,22 @@ describe("registerSchema (Zod schema)", () => {
     expect(result.success).toBe(false);
   });
 
+  it("should reject invalid Philippine phone format", () => {
+    const result = registerSchema.safeParse({
+      ...validRegisterBody,
+      phone: "1234567890",
+    });
+    expect(result.success).toBe(false);
+  });
+
+  it("should accept +63-prefix phone in register", () => {
+    const result = registerSchema.safeParse({
+      ...validRegisterBody,
+      phone: "+639171234567",
+    });
+    expect(result.success).toBe(true);
+  });
+
   it("should reject missing firstName", () => {
     const { firstName, ...noFirst } = validRegisterBody;
     const result = registerSchema.safeParse(noFirst);
@@ -148,5 +210,67 @@ describe("registerSchema (Zod schema)", () => {
       extraField: "something",
     });
     expect(result.success).toBe(true);
+  });
+});
+
+describe("verifyCodeSchema (Zod schema)", () => {
+  const validCode = "123456";
+
+  describe("phone validation", () => {
+    it("should accept a valid 09-prefix phone with code", () => {
+      const result = verifyCodeSchema.safeParse({ phone: "09171234567", code: validCode });
+      expect(result.success).toBe(true);
+    });
+
+    it("should accept a valid +63-prefix phone with code", () => {
+      const result = verifyCodeSchema.safeParse({ phone: "+639171234567", code: validCode });
+      expect(result.success).toBe(true);
+    });
+
+    it("should reject a phone with too few digits", () => {
+      const result = verifyCodeSchema.safeParse({ phone: "0917123456", code: validCode });
+      expect(result.success).toBe(false);
+    });
+
+    it("should reject a phone with too many digits", () => {
+      const result = verifyCodeSchema.safeParse({ phone: "091712345678", code: validCode });
+      expect(result.success).toBe(false);
+    });
+
+    it("should reject a phone without the 09 or +63 prefix", () => {
+      const result = verifyCodeSchema.safeParse({ phone: "12345678901", code: validCode });
+      expect(result.success).toBe(false);
+    });
+
+    it("should reject empty phone with code", () => {
+      const result = verifyCodeSchema.safeParse({ phone: "", code: validCode });
+      expect(result.success).toBe(false);
+    });
+  });
+
+  describe("email validation", () => {
+    it("should accept a valid email with code", () => {
+      const result = verifyCodeSchema.safeParse({ email: "user@example.com", code: validCode });
+      expect(result.success).toBe(true);
+    });
+
+    it("should reject invalid email format", () => {
+      const result = verifyCodeSchema.safeParse({ email: "notanemail", code: validCode });
+      expect(result.success).toBe(false);
+    });
+  });
+
+  describe("code validation", () => {
+    it("should reject code that is not 6 digits", () => {
+      const result = verifyCodeSchema.safeParse({ email: "user@example.com", code: "123" });
+      expect(result.success).toBe(false);
+    });
+  });
+
+  describe("identifier requirement", () => {
+    it("should reject when neither email nor phone is provided", () => {
+      const result = verifyCodeSchema.safeParse({ code: validCode });
+      expect(result.success).toBe(false);
+    });
   });
 });

@@ -1,6 +1,7 @@
 import { sendEmail, SendEmailOptions, SendEmailResult, verificationCodeEmail } from '../../shared/email';
+import { sendSms } from '../../shared/sms';
 import { generateCode } from '../../shared/helpers/code-generator';
-import { VerificationPurpose } from '../../../db/entities/verification-code.entity';
+import { VerificationPurpose, VerificationChannel } from '../../../db/entities/verification-code.entity';
 import { User } from '../../../db/entities/user.entity';
 import { UserDetails } from '../../../db/entities/user-details.entity';
 import { UserRole } from '../../../db/entities/user.entity';
@@ -10,20 +11,19 @@ import { findByEmail, findByPhone } from '../../shared/data-services/user.servic
 import { signToken } from './auth.service';
 
 export interface SendAndStoreCodeParams {
-  email: string;
+  email?: string;
+  phone?: string | null;
   purpose: VerificationPurpose;
   recipientName?: string;
-  phone?: string | null;
 }
 
 export type SendAndStoreCodeResult = {
   success: true;
   codeId: string;
-  emailId: string;
 } | {
   success: false;
   error: string;
-  step: 'email' | 'database';
+  step: 'email' | 'sms' | 'database';
 };
 
 export interface CreateUserParams {
@@ -149,33 +149,52 @@ export async function sendVerificationCode(params: SendAndStoreCodeParams): Prom
 
   const code = generateCode();
 
-  const emailOptions: SendEmailOptions = {
-    to: email,
-    subject: 'Your verification code',
-    html: verificationCodeEmail({ code, recipientName }),
-  };
+  // Determine channel based on identifier provided
+  const channel = email ? VerificationChannel.EMAIL : VerificationChannel.SMS;
 
-  const emailResult: SendEmailResult = await sendEmail(emailOptions);
+  if (email) {
+    const emailOptions: SendEmailOptions = {
+      to: email,
+      subject: 'Your verification code',
+      html: verificationCodeEmail({ code, recipientName }),
+    };
 
-  if (!emailResult.success) {
-    return { success: false, error: emailResult.error, step: 'email' };
+    const emailResult: SendEmailResult = await sendEmail(emailOptions);
+
+    if (!emailResult.success) {
+      return { success: false, error: emailResult.error, step: 'email' };
+    }
+  } else if (phone) {
+    const smsResult = await sendSms({
+      recipient: phone,
+      message: `Your verification code is ${code}`,
+    });
+
+    if (!smsResult.success) {
+      return { success: false, error: smsResult.error, step: 'sms' };
+    }
   }
 
   try {
     const expiresAt = new Date(Date.now() + CODE_EXPIRY_MINUTES * 60 * 1000);
 
-    // Invalidate any previous unused codes for this email + purpose
-    await invalidatePreviousCodes({ email, purpose });
+    // Invalidate any previous unused codes for this identifier + purpose
+    await invalidatePreviousCodes({
+      email: email ?? undefined,
+      phone: phone ?? undefined,
+      purpose,
+    });
 
     const saved = await createVerificationCode({
-      email,
+      email: email ?? '',
       code,
       purpose,
       expiresAt,
       phone: phone ?? null,
+      channel,
     });
 
-    return { success: true, codeId: saved.id, emailId: emailResult.id };
+    return { success: true, codeId: saved.id };
   } catch (error) {
     const message = error instanceof Error ? error.message : 'Failed to save verification code';
     return { success: false, error: message, step: 'database' };

@@ -2,6 +2,7 @@
 
 jest.mock("../../shared/data-services/user.service", () => ({
   findByEmail: jest.fn(),
+  findByPhone: jest.fn(),
 }));
 
 jest.mock("./auth.transaction", () => ({
@@ -13,12 +14,13 @@ jest.mock("./auth.transaction", () => ({
 import request from "supertest";
 import express from "express";
 import authRoutes from "./auth.route";
-import { findByEmail } from "../../shared/data-services/user.service";
+import { findByEmail, findByPhone } from "../../shared/data-services/user.service";
 import { createUser, sendVerificationCode, verifyCode } from "./auth.transaction";
 import { VerificationPurpose } from "../../../db/entities/verification-code.entity";
 import { UserRole } from "../../../db/entities/user.entity";
 
 const mockedFindByEmail = jest.mocked(findByEmail);
+const mockedFindByPhone = jest.mocked(findByPhone);
 const mockedCreateUser = jest.mocked(createUser);
 const mockedSendVerificationCode = jest.mocked(sendVerificationCode);
 const mockedVerifyCode = jest.mocked(verifyCode);
@@ -59,7 +61,6 @@ describe("Auth Feature", () => {
       mockedSendVerificationCode.mockResolvedValue({
         success: true,
         codeId: "code-001",
-        emailId: "email-001",
       });
 
       const response = await request(app)
@@ -190,7 +191,6 @@ describe("Auth Feature", () => {
       mockedSendVerificationCode.mockResolvedValue({
         success: true,
         codeId: "code-002",
-        emailId: "email-002",
       });
 
       await request(app)
@@ -213,7 +213,6 @@ describe("Auth Feature", () => {
       mockedSendVerificationCode.mockResolvedValue({
         success: true,
         codeId: "code-003",
-        emailId: "email-003",
       });
 
       await request(app)
@@ -236,7 +235,6 @@ describe("Auth Feature", () => {
       mockedSendVerificationCode.mockResolvedValue({
         success: true,
         codeId: "code-004",
-        emailId: "email-004",
       });
 
       const response = await request(app)
@@ -248,151 +246,230 @@ describe("Auth Feature", () => {
     });
   });
 
-  describe("POST /auth/validate-email", () => {
+  describe("POST /auth/validate-identifier", () => {
     const validEmail = "test@example.com";
+    const validPhone = "09171234567";
 
-    it("should return 200 with valid:true when email is registered and code is sent", async () => {
-      mockedFindByEmail.mockResolvedValue({ id: "user-1", email: validEmail, details: { firstName: "John" } } as any);
-      mockedSendVerificationCode.mockResolvedValue({ success: true, codeId: "code-1", emailId: "email-1" });
+    describe("email-based", () => {
+      it("should return 200 with valid:true when email is registered and code is sent", async () => {
+        mockedFindByEmail.mockResolvedValue({ id: "user-1", email: validEmail, details: { firstName: "John" } } as any);
+        mockedSendVerificationCode.mockResolvedValue({ success: true, codeId: "code-1" });
 
-      const response = await request(app)
-        .post("/auth/validate-email")
-        .send({ email: validEmail });
+        const response = await request(app)
+          .post("/auth/validate-identifier")
+          .send({ email: validEmail });
 
-      expect(response.status).toBe(200);
-      expect(response.body).toEqual({
-        error: 0,
-        data: { valid: true },
-        message: "Success",
+        expect(response.status).toBe(200);
+        expect(response.body).toEqual({
+          error: 0,
+          data: { valid: true },
+          message: "Success",
+        });
+      });
+
+      it("should return 200 when recipientName is undefined if user has no details", async () => {
+        mockedFindByEmail.mockResolvedValue({ id: "user-1", email: validEmail, details: null } as any);
+        mockedSendVerificationCode.mockResolvedValue({ success: true, codeId: "code-2" });
+
+        const response = await request(app)
+          .post("/auth/validate-identifier")
+          .send({ email: validEmail });
+
+        expect(response.status).toBe(200);
+        expect(mockedSendVerificationCode).toHaveBeenCalledWith(
+          expect.objectContaining({ recipientName: undefined }),
+        );
+      });
+
+      it("should return 400 when email is not registered", async () => {
+        mockedFindByEmail.mockResolvedValue(null);
+
+        const response = await request(app)
+          .post("/auth/validate-identifier")
+          .send({ email: validEmail });
+
+        expect(response.status).toBe(400);
+        expect(response.body).toEqual({
+          error: 1,
+          data: null,
+          message: "Email is not registered",
+        });
+      });
+
+      it("should call findByEmail with the correct email", async () => {
+        mockedFindByEmail.mockResolvedValue({ id: "user-1", email: validEmail } as any);
+        mockedSendVerificationCode.mockResolvedValue({ success: true, codeId: "code-3" });
+
+        await request(app)
+          .post("/auth/validate-identifier")
+          .send({ email: validEmail });
+
+        expect(mockedFindByEmail).toHaveBeenCalledWith(validEmail);
+      });
+
+      it("should call sendVerificationCode with correct params on success path", async () => {
+        mockedFindByEmail.mockResolvedValue({ id: "user-1", email: validEmail, details: { firstName: "Alice" } } as any);
+        mockedSendVerificationCode.mockResolvedValue({ success: true, codeId: "code-4" });
+
+        await request(app)
+          .post("/auth/validate-identifier")
+          .send({ email: validEmail });
+
+        expect(mockedSendVerificationCode).toHaveBeenCalledWith({
+          email: validEmail,
+          phone: undefined,
+          purpose: VerificationPurpose.EMAIL_VERIFICATION,
+          recipientName: "Alice",
+        });
       });
     });
 
-    it("should return 200 when recipientName is undefined if user has no details", async () => {
-      mockedFindByEmail.mockResolvedValue({ id: "user-1", email: validEmail, details: null } as any);
-      mockedSendVerificationCode.mockResolvedValue({ success: true, codeId: "code-2", emailId: "email-2" });
+    describe("phone-based", () => {
+      it("should return 200 with valid:true when phone is registered and code is sent", async () => {
+        mockedFindByPhone.mockResolvedValue({ id: "user-2", phone: validPhone, details: { firstName: "Jane" } } as any);
+        mockedSendVerificationCode.mockResolvedValue({ success: true, codeId: "code-5" });
 
-      const response = await request(app)
-        .post("/auth/validate-email")
-        .send({ email: validEmail });
+        const response = await request(app)
+          .post("/auth/validate-identifier")
+          .send({ phone: validPhone });
 
-      expect(response.status).toBe(200);
-      expect(mockedSendVerificationCode).toHaveBeenCalledWith(
-        expect.objectContaining({ recipientName: undefined }),
-      );
-    });
+        expect(response.status).toBe(200);
+        expect(response.body).toEqual({
+          error: 0,
+          data: { valid: true },
+          message: "Success",
+        });
+      });
 
-    it("should return 400 when email is not provided", async () => {
-      const response = await request(app)
-        .post("/auth/validate-email")
-        .send({});
+      it("should return 400 when phone is not registered", async () => {
+        mockedFindByPhone.mockResolvedValue(null);
 
-      expect(response.status).toBe(400);
-      expect(response.body).toEqual({
-        error: 1,
-        data: null,
-        message: "Invalid email format",
+        const response = await request(app)
+          .post("/auth/validate-identifier")
+          .send({ phone: validPhone });
+
+        expect(response.status).toBe(400);
+        expect(response.body).toEqual({
+          error: 1,
+          data: null,
+          message: "Phone is not registered",
+        });
+      });
+
+      it("should call findByPhone with the correct phone", async () => {
+        mockedFindByPhone.mockResolvedValue({ id: "user-2", phone: validPhone } as any);
+        mockedSendVerificationCode.mockResolvedValue({ success: true, codeId: "code-6" });
+
+        await request(app)
+          .post("/auth/validate-identifier")
+          .send({ phone: validPhone });
+
+        expect(mockedFindByPhone).toHaveBeenCalledWith(validPhone);
+      });
+
+      it("should call sendVerificationCode with phone param", async () => {
+        mockedFindByPhone.mockResolvedValue({ id: "user-2", phone: validPhone, details: { firstName: "Bob" } } as any);
+        mockedSendVerificationCode.mockResolvedValue({ success: true, codeId: "code-7" });
+
+        await request(app)
+          .post("/auth/validate-identifier")
+          .send({ phone: validPhone });
+
+        expect(mockedSendVerificationCode).toHaveBeenCalledWith({
+          email: undefined,
+          phone: validPhone,
+          purpose: VerificationPurpose.EMAIL_VERIFICATION,
+          recipientName: "Bob",
+        });
       });
     });
 
-    it("should return 400 when email format is invalid", async () => {
-      const response = await request(app)
-        .post("/auth/validate-email")
-        .send({ email: "not-an-email" });
+    describe("validation", () => {
+      it("should return 400 when neither email nor phone is provided", async () => {
+        const response = await request(app)
+          .post("/auth/validate-identifier")
+          .send({});
 
-      expect(response.status).toBe(400);
-      expect(response.body).toEqual({
-        error: 1,
-        data: null,
-        message: "Invalid email format",
-      });
-    });
-
-    it("should return 400 when email is empty string", async () => {
-      const response = await request(app)
-        .post("/auth/validate-email")
-        .send({ email: "" });
-
-      expect(response.status).toBe(400);
-      expect(response.body).toEqual({
-        error: 1,
-        data: null,
-        message: "Invalid email format",
-      });
-    });
-
-    it("should return 400 when email is not registered", async () => {
-      mockedFindByEmail.mockResolvedValue(null);
-
-      const response = await request(app)
-        .post("/auth/validate-email")
-        .send({ email: validEmail });
-
-      expect(response.status).toBe(400);
-      expect(response.body).toEqual({
-        error: 1,
-        data: null,
-        message: "Email is not registered",
-      });
-    });
-
-    it("should return 500 when sendVerificationCode fails", async () => {
-      mockedFindByEmail.mockResolvedValue({ id: "user-1", email: validEmail } as any);
-      mockedSendVerificationCode.mockResolvedValue({
-        success: false,
-        error: "Email service unavailable",
-        step: "email",
+        expect(response.status).toBe(400);
+        expect(response.body).toEqual({
+          error: 1,
+          data: null,
+          message: "Either email or phone is required",
+        });
       });
 
-      const response = await request(app)
-        .post("/auth/validate-email")
-        .send({ email: validEmail });
+      it("should return 400 when email format is invalid", async () => {
+        const response = await request(app)
+          .post("/auth/validate-identifier")
+          .send({ email: "not-an-email" });
 
-      expect(response.status).toBe(500);
-      expect(response.body).toEqual({
-        error: 1,
-        data: null,
-        message: "Email service unavailable",
+        expect(response.status).toBe(400);
+        expect(response.body).toEqual({
+          error: 1,
+          data: null,
+          message: "Invalid email format",
+        });
       });
-    });
 
-    it("should return 500 when an unexpected error occurs", async () => {
-      mockedFindByEmail.mockRejectedValue(new Error("Database connection lost"));
+      it("should return 400 when email is empty string", async () => {
+        const response = await request(app)
+          .post("/auth/validate-identifier")
+          .send({ email: "" });
 
-      const response = await request(app)
-        .post("/auth/validate-email")
-        .send({ email: validEmail });
-
-      expect(response.status).toBe(500);
-      expect(response.body).toEqual({
-        error: 1,
-        data: null,
-        message: "Internal server error",
+        expect(response.status).toBe(400);
+        expect(response.body).toEqual({
+          error: 1,
+          data: null,
+          message: "Invalid email format",
+        });
       });
-    });
 
-    it("should call findByEmail with the correct email", async () => {
-      mockedFindByEmail.mockResolvedValue({ id: "user-1", email: validEmail } as any);
-      mockedSendVerificationCode.mockResolvedValue({ success: true, codeId: "code-3", emailId: "email-3" });
+      it("should return 400 when phone is empty string", async () => {
+        const response = await request(app)
+          .post("/auth/validate-identifier")
+          .send({ phone: "" });
 
-      await request(app)
-        .post("/auth/validate-email")
-        .send({ email: validEmail });
+        expect(response.status).toBe(400);
+        expect(response.body).toEqual({
+          error: 1,
+          data: null,
+          message: "Phone must be a valid Philippine mobile number (e.g., 09171234567 or +639171234567)",
+        });
+      });
 
-      expect(mockedFindByEmail).toHaveBeenCalledWith(validEmail);
-    });
+      it("should return 500 when sendVerificationCode fails", async () => {
+        mockedFindByEmail.mockResolvedValue({ id: "user-1", email: validEmail } as any);
+        mockedSendVerificationCode.mockResolvedValue({
+          success: false,
+          error: "Email service unavailable",
+          step: "email",
+        });
 
-    it("should call sendVerificationCode with correct params on success path", async () => {
-      mockedFindByEmail.mockResolvedValue({ id: "user-1", email: validEmail, details: { firstName: "Alice" } } as any);
-      mockedSendVerificationCode.mockResolvedValue({ success: true, codeId: "code-4", emailId: "email-4" });
+        const response = await request(app)
+          .post("/auth/validate-identifier")
+          .send({ email: validEmail });
 
-      await request(app)
-        .post("/auth/validate-email")
-        .send({ email: validEmail });
+        expect(response.status).toBe(500);
+        expect(response.body).toEqual({
+          error: 1,
+          data: null,
+          message: "Email service unavailable",
+        });
+      });
 
-      expect(mockedSendVerificationCode).toHaveBeenCalledWith({
-        email: validEmail,
-        purpose: VerificationPurpose.EMAIL_VERIFICATION,
-        recipientName: "Alice",
+      it("should return 500 when an unexpected error occurs", async () => {
+        mockedFindByEmail.mockRejectedValue(new Error("Database connection lost"));
+
+        const response = await request(app)
+          .post("/auth/validate-identifier")
+          .send({ email: validEmail });
+
+        expect(response.status).toBe(500);
+        expect(response.body).toEqual({
+          error: 1,
+          data: null,
+          message: "Internal server error",
+        });
       });
     });
   });

@@ -5,6 +5,10 @@ jest.mock("../../shared/email", () => ({
   verificationCodeEmail: jest.fn(),
 }));
 
+jest.mock("../../shared/sms", () => ({
+  sendSms: jest.fn(),
+}));
+
 jest.mock("../../shared/helpers/code-generator", () => ({
   generateCode: jest.fn(),
 }));
@@ -96,13 +100,12 @@ describe("sendVerificationCode", () => {
       } as any);
     });
 
-    it("should return success with codeId and emailId", async () => {
+    it("should return success with codeId", async () => {
       const result = await sendVerificationCode(defaultParams);
 
       expect(result).toEqual({
         success: true,
         codeId: "vc-001",
-        emailId: "email-sent-001",
       });
     });
 
@@ -143,6 +146,7 @@ describe("sendVerificationCode", () => {
 
       expect(mockedInvalidatePreviousCodes).toHaveBeenCalledWith({
         email: "user@example.com",
+        phone: undefined,
         purpose: VerificationPurpose.EMAIL_VERIFICATION,
       });
       // createVerificationCode should be called after invalidatePreviousCodes
@@ -154,7 +158,7 @@ describe("sendVerificationCode", () => {
       );
     });
 
-    it("should create a verification code with expiry of 10 minutes", async () => {
+    it("should create a verification code with expiry of 10 minutes and EMAIL channel", async () => {
       const beforeCall = Date.now();
 
       await sendVerificationCode(defaultParams);
@@ -164,6 +168,7 @@ describe("sendVerificationCode", () => {
       expect(createCall.code).toBe("483920");
       expect(createCall.purpose).toBe(VerificationPurpose.EMAIL_VERIFICATION);
       expect(createCall.phone).toBeNull();
+      expect(createCall.channel).toBe('email');
       expect(createCall.expiresAt.getTime()).toBeGreaterThanOrEqual(
         beforeCall + 10 * 60 * 1000 - 100,
       );
@@ -172,14 +177,20 @@ describe("sendVerificationCode", () => {
       );
     });
 
-    it("should pass phone number to createVerificationCode when provided", async () => {
+    it("should pass phone number and SMS channel to createVerificationCode when phone provided", async () => {
+      mockedGenerateCode.mockReturnValue('483920');
+      mockedVerificationCodeEmail.mockReturnValue('<p>dummy</p>');
+      mockedSendEmail.mockResolvedValue({ success: true, id: 'email-1' });
+      mockedInvalidatePreviousCodes.mockResolvedValue(undefined);
+      mockedCreateVerificationCode.mockResolvedValue({ id: 'vc-002' } as any);
+
       await sendVerificationCode({
         ...defaultParams,
         phone: "09171234567",
       });
 
       expect(mockedCreateVerificationCode).toHaveBeenCalledWith(
-        expect.objectContaining({ phone: "09171234567" }),
+        expect.objectContaining({ phone: "09171234567", channel: 'email' }),
       );
     });
 
@@ -346,6 +357,55 @@ describe("sendVerificationCode", () => {
       expect(mockedSendEmail).toHaveBeenCalledTimes(1);
       expect(mockedInvalidatePreviousCodes).toHaveBeenCalled();
       expect(mockedCreateVerificationCode).toHaveBeenCalled();
+    });
+  });
+
+  describe("SMS delivery", () => {
+    beforeEach(() => {
+      jest.clearAllMocks();
+      mockedGenerateCode.mockReturnValue('483920');
+    });
+
+    it("should send SMS and create code with SMS channel when only phone is provided", async () => {
+      const { sendSms } = require('../../shared/sms');
+      sendSms.mockResolvedValue({ success: true });
+
+      mockedInvalidatePreviousCodes.mockResolvedValue(undefined);
+      mockedCreateVerificationCode.mockResolvedValue({ id: 'vc-sms-001' } as any);
+
+      const result = await sendVerificationCode({
+        phone: '09171234567',
+        purpose: VerificationPurpose.SIGNUP,
+      });
+
+      expect(result).toEqual({ success: true, codeId: 'vc-sms-001' });
+      expect(sendSms).toHaveBeenCalledWith({
+        recipient: '09171234567',
+        message: 'Your verification code is 483920',
+      });
+      expect(mockedCreateVerificationCode).toHaveBeenCalledWith(
+        expect.objectContaining({
+          phone: '09171234567',
+          channel: 'sms',
+          email: '',
+        }),
+      );
+    });
+
+    it("should return failure with step 'sms' when SMS fails", async () => {
+      const { sendSms } = require('../../shared/sms');
+      sendSms.mockResolvedValue({ success: false, error: 'SMS provider error' });
+
+      const result = await sendVerificationCode({
+        phone: '09171234567',
+        purpose: VerificationPurpose.SIGNUP,
+      });
+
+      expect(result).toEqual({
+        success: false,
+        error: 'SMS provider error',
+        step: 'sms',
+      });
     });
   });
 

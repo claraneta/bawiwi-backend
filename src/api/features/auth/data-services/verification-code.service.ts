@@ -1,6 +1,6 @@
 import { IsNull, Repository } from 'typeorm';
 import { AppDataSource } from '../../../../db/data-source';
-import { VerificationCode, VerificationPurpose } from '../../../../db/entities/verification-code.entity';
+import { VerificationCode, VerificationPurpose, VerificationChannel } from '../../../../db/entities/verification-code.entity';
 
 const repo: Repository<VerificationCode> = AppDataSource.getRepository(VerificationCode);
 
@@ -10,30 +10,37 @@ export interface CreateVerificationCodeParams {
   purpose: VerificationPurpose;
   expiresAt: Date;
   phone?: string | null;
+  channel?: VerificationChannel;
 }
 
 /**
- * Invalidates all unused, non-expired verification codes for the given email + purpose
- * by setting their `usedAt` timestamp to now. This ensures only the latest code is valid.
+ * Invalidates all unused verification codes for the given identifier + purpose
+ * by setting their `usedAt` timestamp to now. Supports email or phone lookup.
  */
 export async function invalidatePreviousCodes(params: {
-  email: string;
+  email?: string;
+  phone?: string;
   purpose: VerificationPurpose;
 }): Promise<void> {
-  const { email, purpose } = params;
+  const { email, phone, purpose } = params;
 
-  await repo.update(
-    {
-      email,
-      purpose,
-      usedAt: IsNull(),
-    },
-    { usedAt: new Date() },
-  );
+  if (email) {
+    await repo.update(
+      { email, purpose, usedAt: IsNull() },
+      { usedAt: new Date() },
+    );
+  }
+
+  if (phone) {
+    await repo.update(
+      { phone, purpose, usedAt: IsNull() },
+      { usedAt: new Date() },
+    );
+  }
 }
 
 export async function createVerificationCode(params: CreateVerificationCodeParams): Promise<VerificationCode> {
-  const { email, code, purpose, expiresAt, phone } = params;
+  const { email, code, purpose, expiresAt, phone, channel } = params;
 
   const entity = repo.create({
     email,
@@ -41,6 +48,7 @@ export async function createVerificationCode(params: CreateVerificationCodeParam
     purpose,
     expiresAt,
     phone: phone ?? null,
+    channel: channel ?? VerificationChannel.EMAIL,
   });
 
   return repo.save(entity);
