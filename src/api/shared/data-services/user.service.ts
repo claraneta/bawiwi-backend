@@ -12,6 +12,10 @@ export async function findByEmail(email: string): Promise<User | null> {
   return repo.findOneBy({ email });
 }
 
+export async function findByPhone(phone: string): Promise<User | null> {
+  return repo.findOneBy({ phone });
+}
+
 export async function findByRole(role: UserRole): Promise<User[]> {
   return repo.findBy({ role });
 }

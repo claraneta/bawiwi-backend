@@ -7,18 +7,21 @@ jest.mock("../../shared/data-services/user.service", () => ({
 jest.mock("./auth.transaction", () => ({
   sendVerificationCode: jest.fn(),
   createUser: jest.fn(),
+  verifyCode: jest.fn(),
 }));
 
 import request from "supertest";
 import express from "express";
 import authRoutes from "./auth.route";
 import { findByEmail } from "../../shared/data-services/user.service";
-import { createUser, sendVerificationCode } from "./auth.transaction";
+import { createUser, sendVerificationCode, verifyCode } from "./auth.transaction";
 import { VerificationPurpose } from "../../../db/entities/verification-code.entity";
+import { UserRole } from "../../../db/entities/user.entity";
 
 const mockedFindByEmail = jest.mocked(findByEmail);
 const mockedCreateUser = jest.mocked(createUser);
 const mockedSendVerificationCode = jest.mocked(sendVerificationCode);
+const mockedVerifyCode = jest.mocked(verifyCode);
 
 describe("Auth Feature", () => {
   let app: express.Application;
@@ -390,6 +393,173 @@ describe("Auth Feature", () => {
         email: validEmail,
         purpose: VerificationPurpose.EMAIL_VERIFICATION,
         recipientName: "Alice",
+      });
+    });
+  });
+
+  describe("POST /auth/verify-code", () => {
+    const emailBody = {
+      email: "test@example.com",
+      code: "123456",
+    };
+
+    const phoneBody = {
+      phone: "09171234567",
+      code: "654321",
+    };
+
+    const mockToken = "jwt-token-abc123";
+    const mockUser = { id: "user-1", email: "test@example.com", role: UserRole.WORKER as const };
+
+    describe("email-based", () => {
+      it("should return 200 with token and user when code is valid", async () => {
+        mockedVerifyCode.mockResolvedValue({
+          success: true,
+          token: mockToken,
+          user: mockUser,
+        });
+
+        const response = await request(app)
+          .post("/auth/verify-code")
+          .send(emailBody);
+
+        expect(response.status).toBe(200);
+        expect(response.body).toEqual({
+          error: 0,
+          data: { token: mockToken, user: mockUser },
+          message: "Success",
+        });
+      });
+
+      it("should call verifyCode with email, phone undefined, and code", async () => {
+        mockedVerifyCode.mockResolvedValue({
+          success: true,
+          token: mockToken,
+          user: mockUser,
+        });
+
+        await request(app)
+          .post("/auth/verify-code")
+          .send(emailBody);
+
+        expect(mockedVerifyCode).toHaveBeenCalledWith({
+          email: "test@example.com",
+          phone: undefined,
+          code: "123456",
+        });
+      });
+    });
+
+    describe("phone-based", () => {
+      it("should return 200 with token and user when phone code is valid", async () => {
+        mockedVerifyCode.mockResolvedValue({
+          success: true,
+          token: mockToken,
+          user: mockUser,
+        });
+
+        const response = await request(app)
+          .post("/auth/verify-code")
+          .send(phoneBody);
+
+        expect(response.status).toBe(200);
+        expect(response.body).toEqual({
+          error: 0,
+          data: { token: mockToken, user: mockUser },
+          message: "Success",
+        });
+      });
+
+      it("should call verifyCode with phone, email undefined, and code", async () => {
+        mockedVerifyCode.mockResolvedValue({
+          success: true,
+          token: mockToken,
+          user: mockUser,
+        });
+
+        await request(app)
+          .post("/auth/verify-code")
+          .send(phoneBody);
+
+        expect(mockedVerifyCode).toHaveBeenCalledWith({
+          email: undefined,
+          phone: "09171234567",
+          code: "654321",
+        });
+      });
+    });
+
+    describe("validation", () => {
+      it("should return 400 when code is invalid or expired", async () => {
+        mockedVerifyCode.mockResolvedValue({
+          success: false,
+          error: "Invalid or expired verification code",
+        });
+
+        const response = await request(app)
+          .post("/auth/verify-code")
+          .send(emailBody);
+
+        expect(response.status).toBe(400);
+        expect(response.body).toEqual({
+          error: 1,
+          data: null,
+          message: "Invalid or expired verification code",
+        });
+      });
+
+      it("should return 400 when email format is invalid", async () => {
+        const response = await request(app)
+          .post("/auth/verify-code")
+          .send({ email: "not-an-email", code: "123456" });
+
+        expect(response.status).toBe(400);
+        expect(response.body).toEqual({
+          error: 1,
+          data: null,
+          message: "Invalid email format",
+        });
+      });
+
+      it("should return 400 when code is not 6 digits", async () => {
+        const response = await request(app)
+          .post("/auth/verify-code")
+          .send({ email: "test@example.com", code: "123" });
+
+        expect(response.status).toBe(400);
+        expect(response.body).toEqual({
+          error: 1,
+          data: null,
+          message: "Code must be 6 digits",
+        });
+      });
+
+      it("should return 400 when neither email nor phone is provided", async () => {
+        const response = await request(app)
+          .post("/auth/verify-code")
+          .send({ code: "123456" });
+
+        expect(response.status).toBe(400);
+        expect(response.body).toEqual({
+          error: 1,
+          data: null,
+          message: "Either email or phone is required",
+        });
+      });
+
+      it("should return 500 when an unexpected error occurs", async () => {
+        mockedVerifyCode.mockRejectedValue(new Error("Unexpected error"));
+
+        const response = await request(app)
+          .post("/auth/verify-code")
+          .send(emailBody);
+
+        expect(response.status).toBe(500);
+        expect(response.body).toEqual({
+          error: 1,
+          data: null,
+          message: "Internal server error",
+        });
       });
     });
   });

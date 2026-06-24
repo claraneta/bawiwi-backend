@@ -3,8 +3,8 @@ import { UserRole } from "../../../db/entities/user.entity";
 import { VerificationPurpose } from "../../../db/entities/verification-code.entity";
 import { badRequest, conflict, created, internalError, success } from "../../response-builder";
 import { findByEmail } from "../../shared/data-services/user.service";
-import { createUser, sendVerificationCode } from "./auth.transaction";
-import { RegisterBody, ValidateEmailBody } from "./auth.validator";
+import { createUser, sendVerificationCode, verifyCode } from "./auth.transaction";
+import { RegisterBody, ValidateEmailBody, VerifyCodeBody } from "./auth.validator";
 
 export const validateEmail = async (
   req: Request,
@@ -32,6 +32,31 @@ export const validateEmail = async (
     }
 
     success(res, { valid: true });
+    return;
+  } catch (error) {
+    internalError(res);
+    return;
+  }
+};
+
+export const verifyCodeHandler = async (
+  req: Request,
+  res: Response,
+) => {
+  try {
+    const { email, phone, code }: VerifyCodeBody = req.body;
+
+    const result = await verifyCode({ email, phone, code });
+
+    if (!result.success) {
+      badRequest(res, result.error);
+      return;
+    }
+
+    success(res, {
+      token: result.token,
+      user: result.user,
+    });
     return;
   } catch (error) {
     internalError(res);

@@ -22,3 +22,16 @@ export const registerSchema = z.object({
 });
 
 export type RegisterBody = z.infer<typeof registerSchema>;
+
+// --------------- verify-code ---------------
+
+export const verifyCodeSchema = z.object({
+  email: z.email({ message: "Invalid email format" }).optional(),
+  phone: z.string().min(1, "Phone is required").optional(),
+  code: z.string().length(6, "Code must be 6 digits"),
+}).refine(
+  (data) => data.email !== undefined || data.phone !== undefined,
+  { message: "Either email or phone is required", path: ["email"] },
+);
+
+export type VerifyCodeBody = z.infer<typeof verifyCodeSchema>;

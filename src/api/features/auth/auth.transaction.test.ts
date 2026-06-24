@@ -12,6 +12,13 @@ jest.mock("../../shared/helpers/code-generator", () => ({
 jest.mock("./data-services/verification-code.service", () => ({
   createVerificationCode: jest.fn(),
   invalidatePreviousCodes: jest.fn(),
+  findValidCode: jest.fn(),
+  markCodeAsUsed: jest.fn(),
+}));
+
+jest.mock("../../shared/data-services/user.service", () => ({
+  findByEmail: jest.fn(),
+  findByPhone: jest.fn(),
 }));
 
 jest.mock("../../../db/data-source", () => {
@@ -47,8 +54,11 @@ import { generateCode } from "../../shared/helpers/code-generator";
 import {
   createVerificationCode,
   invalidatePreviousCodes,
+  findValidCode,
+  markCodeAsUsed,
 } from "./data-services/verification-code.service";
-import { sendVerificationCode, createUser } from "./auth.transaction";
+import { findByEmail, findByPhone } from "../../shared/data-services/user.service";
+import { sendVerificationCode, createUser, verifyCode } from "./auth.transaction";
 import { VerificationPurpose } from "../../../db/entities/verification-code.entity";
 import { User, UserRole } from "../../../db/entities/user.entity";
 
@@ -57,6 +67,10 @@ const mockedVerificationCodeEmail = jest.mocked(verificationCodeEmail);
 const mockedGenerateCode = jest.mocked(generateCode);
 const mockedCreateVerificationCode = jest.mocked(createVerificationCode);
 const mockedInvalidatePreviousCodes = jest.mocked(invalidatePreviousCodes);
+const mockedFindValidCode = jest.mocked(findValidCode);
+const mockedMarkCodeAsUsed = jest.mocked(markCodeAsUsed);
+const mockedFindByEmail = jest.mocked(findByEmail);
+const mockedFindByPhone = jest.mocked(findByPhone);
 
 describe("sendVerificationCode", () => {
   const defaultParams = {
@@ -521,6 +535,231 @@ describe("sendVerificationCode", () => {
       const result = await createUser(createParams);
 
       expect(result).toEqual({ success: false, error: "Failed to create user" });
+    });
+  });
+
+  describe("verifyCode", () => {
+    const emailParams = {
+      email: "test@example.com",
+      code: "123456",
+    };
+
+    const phoneParams = {
+      phone: "09171234567",
+      code: "654321",
+    };
+
+    const mockEmailRecord = {
+      id: "vc-email-001",
+      email: "test@example.com",
+      phone: null,
+      code: "123456",
+      purpose: VerificationPurpose.SIGNUP,
+      expiresAt: new Date(Date.now() + 60 * 60 * 1000), // 1 hour from now
+      usedAt: null,
+    };
+
+    const mockPhoneRecord = {
+      id: "vc-phone-001",
+      email: "test@example.com",
+      phone: "09171234567",
+      code: "654321",
+      purpose: VerificationPurpose.SIGNUP,
+      expiresAt: new Date(Date.now() + 60 * 60 * 1000),
+      usedAt: null,
+    };
+
+    const mockUser = {
+      id: "user-001",
+      email: "test@example.com",
+      role: UserRole.WORKER,
+    };
+
+    afterEach(() => {
+      jest.clearAllMocks();
+    });
+
+    describe("email-based verification", () => {
+      beforeEach(() => {
+        mockedFindValidCode.mockResolvedValue(mockEmailRecord as any);
+        mockedFindByEmail.mockResolvedValue(mockUser as any);
+        mockedMarkCodeAsUsed.mockResolvedValue(undefined);
+      });
+
+      it("should return success with token and user when valid code is found", async () => {
+        const result = await verifyCode(emailParams);
+
+        expect(result.success).toBe(true);
+        if (result.success) {
+          expect(result.token).toBeTruthy();
+          expect(typeof result.token).toBe("string");
+          expect(result.user).toEqual({
+            id: mockUser.id,
+            email: mockUser.email,
+            role: mockUser.role,
+          });
+        }
+      });
+
+      it("should call findValidCode with email, code, and SIGNUP purpose", async () => {
+        await verifyCode(emailParams);
+
+        expect(mockedFindValidCode).toHaveBeenCalledWith({
+          email: emailParams.email,
+          phone: undefined,
+          code: emailParams.code,
+          purpose: VerificationPurpose.SIGNUP,
+        });
+      });
+
+      it("should mark the code as used after successful verification", async () => {
+        await verifyCode(emailParams);
+
+        expect(mockedMarkCodeAsUsed).toHaveBeenCalledWith(mockEmailRecord.id);
+        expect(mockedFindValidCode.mock.invocationCallOrder[0]).toBeLessThan(
+          mockedMarkCodeAsUsed.mock.invocationCallOrder[0],
+        );
+      });
+
+      it("should look up the user by email", async () => {
+        await verifyCode(emailParams);
+
+        expect(mockedFindByEmail).toHaveBeenCalledWith(emailParams.email);
+        expect(mockedFindByPhone).not.toHaveBeenCalled();
+      });
+
+      it("should sign a JWT with userId, email, and role", async () => {
+        const result = await verifyCode(emailParams);
+
+        expect(result.success).toBe(true);
+        if (result.success) {
+          expect(result.token.split(".").length).toBe(3);
+        }
+      });
+    });
+
+    describe("phone-based verification", () => {
+      beforeEach(() => {
+        mockedFindValidCode.mockResolvedValue(mockPhoneRecord as any);
+        mockedFindByPhone.mockResolvedValue(mockUser as any);
+        mockedMarkCodeAsUsed.mockResolvedValue(undefined);
+      });
+
+      it("should return success when valid phone code is found", async () => {
+        const result = await verifyCode(phoneParams);
+
+        expect(result.success).toBe(true);
+        if (result.success) {
+          expect(result.token).toBeTruthy();
+          expect(result.user).toEqual({
+            id: mockUser.id,
+            email: mockUser.email,
+            role: mockUser.role,
+          });
+        }
+      });
+
+      it("should call findValidCode with phone, code, and SIGNUP purpose", async () => {
+        await verifyCode(phoneParams);
+
+        expect(mockedFindValidCode).toHaveBeenCalledWith({
+          email: undefined,
+          phone: phoneParams.phone,
+          code: phoneParams.code,
+          purpose: VerificationPurpose.SIGNUP,
+        });
+      });
+
+      it("should look up the user by phone", async () => {
+        await verifyCode(phoneParams);
+
+        expect(mockedFindByPhone).toHaveBeenCalledWith(phoneParams.phone);
+        expect(mockedFindByEmail).not.toHaveBeenCalled();
+      });
+    });
+
+    describe("failure path", () => {
+      it("should return failure when code is not found", async () => {
+        mockedFindValidCode.mockResolvedValue(null);
+
+        const result = await verifyCode(emailParams);
+
+        expect(result).toEqual({
+          success: false,
+          error: "Invalid or expired verification code",
+        });
+        expect(mockedMarkCodeAsUsed).not.toHaveBeenCalled();
+        expect(mockedFindByEmail).not.toHaveBeenCalled();
+      });
+
+      it("should return failure when code is expired", async () => {
+        mockedFindValidCode.mockResolvedValue({
+          ...mockEmailRecord,
+          expiresAt: new Date(Date.now() - 1000),
+        } as any);
+
+        const result = await verifyCode(emailParams);
+
+        expect(result).toEqual({
+          success: false,
+          error: "Verification code has expired",
+        });
+        expect(mockedMarkCodeAsUsed).not.toHaveBeenCalled();
+        expect(mockedFindByEmail).not.toHaveBeenCalled();
+      });
+
+      it("should return failure when user is not found", async () => {
+        mockedFindValidCode.mockResolvedValue(mockEmailRecord as any);
+        mockedFindByEmail.mockResolvedValue(null);
+
+        const result = await verifyCode(emailParams);
+
+        expect(result).toEqual({
+          success: false,
+          error: "User not found",
+        });
+        expect(mockedMarkCodeAsUsed).not.toHaveBeenCalled();
+      });
+
+      it("should return fallback error message when an unexpected error occurs", async () => {
+        mockedFindValidCode.mockRejectedValue("string error");
+
+        const result = await verifyCode(emailParams);
+
+        expect(result).toEqual({
+          success: false,
+          error: "Failed to verify code",
+        });
+      });
+
+      it("should return error message from Error instance when thrown", async () => {
+        mockedFindValidCode.mockRejectedValue(new Error("Database connection lost"));
+
+        const result = await verifyCode(emailParams);
+
+        expect(result).toEqual({
+          success: false,
+          error: "Database connection lost",
+        });
+      });
+
+      it("should return failure when neither email nor phone is provided", async () => {
+        mockedFindValidCode.mockResolvedValue(null);
+
+        const result = await verifyCode({ code: "123456" });
+
+        expect(result).toEqual({
+          success: false,
+          error: "Invalid or expired verification code",
+        });
+        expect(mockedFindValidCode).toHaveBeenCalledWith({
+          email: undefined,
+          phone: undefined,
+          code: "123456",
+          purpose: VerificationPurpose.SIGNUP,
+        });
+        expect(mockedMarkCodeAsUsed).not.toHaveBeenCalled();
+      });
     });
   });
 });

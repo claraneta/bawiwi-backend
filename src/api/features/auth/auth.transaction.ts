@@ -5,7 +5,9 @@ import { User } from '../../../db/entities/user.entity';
 import { UserDetails } from '../../../db/entities/user-details.entity';
 import { UserRole } from '../../../db/entities/user.entity';
 import { AppDataSource } from '../../../db/data-source';
-import { createVerificationCode, invalidatePreviousCodes } from './data-services/verification-code.service';
+import { createVerificationCode, invalidatePreviousCodes, findValidCode, markCodeAsUsed } from './data-services/verification-code.service';
+import { findByEmail, findByPhone } from '../../shared/data-services/user.service';
+import { signToken } from './auth.service';
 
 export interface SendAndStoreCodeParams {
   email: string;
@@ -68,6 +70,74 @@ export async function createUser(params: CreateUserParams): Promise<CreateUserRe
     return { success: true, user: savedUser };
   } catch (error) {
     const message = error instanceof Error ? error.message : 'Failed to create user';
+    return { success: false, error: message };
+  }
+}
+
+export type VerifyCodeResult = {
+  success: true;
+  token: string;
+  user: {
+    id: string;
+    email: string;
+    role: UserRole;
+  };
+} | {
+  success: false;
+  error: string;
+};
+
+export async function verifyCode(params: {
+  email?: string;
+  phone?: string;
+  code: string;
+}): Promise<VerifyCodeResult> {
+  try {
+    const record = await findValidCode({
+      email: params.email,
+      phone: params.phone,
+      code: params.code,
+      purpose: VerificationPurpose.SIGNUP,
+    });
+
+    if (!record) {
+      return { success: false, error: "Invalid or expired verification code" };
+    }
+
+    if (record.expiresAt < new Date()) {
+      return { success: false, error: "Verification code has expired" };
+    }
+
+    // Look up the user by the identifier that was used to verify
+    const user = params.email
+      ? await findByEmail(params.email)
+      : params.phone
+        ? await findByPhone(params.phone)
+        : null;
+
+    if (!user) {
+      return { success: false, error: "User not found" };
+    }
+
+    await markCodeAsUsed(record.id);
+
+    const token = signToken({
+      userId: user.id,
+      email: user.email,
+      role: user.role,
+    });
+
+    return {
+      success: true,
+      token,
+      user: {
+        id: user.id,
+        email: user.email,
+        role: user.role,
+      },
+    };
+  } catch (error) {
+    const message = error instanceof Error ? error.message : "Failed to verify code";
     return { success: false, error: message };
   }
 }

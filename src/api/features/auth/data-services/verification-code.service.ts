@@ -45,3 +45,36 @@ export async function createVerificationCode(params: CreateVerificationCodeParam
 
   return repo.save(entity);
 }
+
+export async function findValidCode(params: {
+  email?: string;
+  phone?: string;
+  code: string;
+  purpose: VerificationPurpose;
+}): Promise<VerificationCode | null> {
+  const { email, phone, code, purpose } = params;
+
+  if (email) {
+    return repo.findOneBy({
+      email,
+      code,
+      purpose,
+      usedAt: IsNull(),
+    });
+  }
+
+  if (phone) {
+    return repo.findOneBy({
+      phone,
+      code,
+      purpose,
+      usedAt: IsNull(),
+    });
+  }
+
+  return null;
+}
+
+export async function markCodeAsUsed(id: string): Promise<void> {
+  await repo.update({ id }, { usedAt: new Date() });
+}
