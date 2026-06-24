@@ -15,7 +15,8 @@
     "start": "node dist/index.js",
     "typeorm": "ts-node ./node_modules/typeorm/cli.js -d src/db/data-source.ts",
     "migration:run": "npx typeorm-ts-node-commonjs migration:run -d ./src/db/data-source.ts",
-    "migration:generate": "node scripts/migration-generate.js"
+    "migration:generate": "node scripts/migration-generate.js",
+    "seed": "ts-node src/db/seeders/index.ts"
   },
   "devDependencies": {
     "@types/express": "^5.0.6",
